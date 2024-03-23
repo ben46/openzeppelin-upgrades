@@ -1,0 +1,165 @@
+```= Hardhat 使用指南
+
+此程序包为 Hardhat 脚本添加函数，以便您可以为合约部署和升级代理。依赖于 `ethers.js`。
+
+提示：参阅 https://forum.openzeppelin.com/t/openzeppelin-buidler-upgrades-step-by-step-tutorial/3580[逐步指南]，其中演示从创建、测试和部署到使用 Gnosis Safe 升级的全部流程。
+
+[[install]]
+== 安装
+
+[source,console]
+----
+$ npm install --save-dev @openzeppelin/hardhat-upgrades
+$ npm install --save-dev @nomicfoundation/hardhat-ethers ethers # 对等依赖
+----
+
+并在 https://hardhat.org/config[`hardhat.config.js`]: 中注册插件：
+
+[source,js]
+----
+require('@openzeppelin/hardhat-upgrades');
+----
+
+[[script-usage]]
+== 在脚本中使用
+
+[[proxies]]
+=== 代理
+
+您可以在 https://hardhat.org/guides/scripts.html[Hardhat 脚本] 中使用此插件通过 `deployProxy` 函数部署可升级的一个合约实例：
+
+[source,js]
+----
+// scripts/create-box.js
+const { ethers, upgrades } = require("hardhat");
+
+async function main() {
+  const Box = await ethers.getContractFactory("Box");
+  const box = await upgrades.deployProxy(Box, [42]);
+  await box.waitForDeployment();
+  console.log("Box 已部署到：", await box.getAddress());
+}
+
+main();
+----
+
+这将自动检查 `Box` 合约是否为 upgrade-safe（安全升级），为 `Box` 合约部署实现合约（除非已经存在来自之前部署的实现合约），创建代理（以及在需要时创建代理管理员），并通过调用 `initialize(42)` 初始化它。
+
+然后，在另一个脚本中，您可以使用 `upgradeProxy` 函数将部署的实例升级到新版本。新版本可以是不同的合约（例如 `BoxV2`），或者您也可以仅修改已有的 `Box` 合约并重新编译它——插件会注意到它发生了改变。
+
+[source,js]
+----
+// scripts/upgrade-box.js
+const { ethers, upgrades } = require("hardhat");
+
+async function main() {
+  const BoxV2 = await ethers.getContractFactory("BoxV2");
+  const box = await upgrades.upgradeProxy(BOX_ADDRESS, BoxV2);
+  console.log("Box 已升级");
+}
+
+main();
+----
+
+> 请注意：尽管此插件会跟踪您在每个网络中部署的所有实现合约，以便重复使用它们并验证存储兼容性，但 _不会_ 跟踪您部署的代理。这意味着您将需要手动跟踪每个部署地址，以便在需要时将这些地址提供给升级函数。
+
+该插件将负责比较 `BoxV2` 与前一个合约，确保它们对于升级是兼容的，部署新的 `BoxV2` 实现合约（除非已经存在来自之前部署的实现合约），并将现有的代理升级到新实现。
+
+[[beacon-proxies]]
+=== 灯塔代理
+
+您还可以使用此插件使用 `deployBeacon` 函数为您的合约部署可升级灯塔，然后通过使用 `deployBeaconProxy` 函数部署一个或多个指向该灯塔的灯塔代理。
+
+[source,js]
+----
+// scripts/create-box.js
+const { ethers, upgrades } = require("hardhat");
+
+async function main() {
+  const Box = await ethers.getContractFactory("Box");
+
+  const beacon = await upgrades.deployBeacon(Box);
+  await beacon.waitForDeployment();
+  console.log("灯塔已部署到：", await beacon.getAddress());
+
+  const box = await upgrades.deployBeaconProxy(beacon, Box, [42]);
+  await box.waitForDeployment();
+  console.log("Box 已部署到：", await box.getAddress());
+}
+
+main();
+----
+
+然后，在另一个脚本中，您可以使用 `upgradeBeacon` 函数将灯塔升级到新版本。当灯塔升级时，指向它的所有灯塔代理都将使用新的合约实现。
+
+[source,js]
+----
+// scripts/upgrade-box.js
+const { ethers, upgrades } = require("hardhat");
+
+async function main() {
+  const BoxV2 = await ethers.getContractFactory("BoxV2");
+
+  await upgrades.upgradeBeacon(BEACON_ADDRESS, BoxV2);
+  console.log("灯塔已升级");
+
+  const box = BoxV2.attach(BOX_ADDRESS);
+}
+
+main();
+----
+
+[[test-usage]]
+== 在测试中使用
+
+您还可以从 Hardhat 测试中使用插件的函数，以防您想添加合约升级测试（您应该这样做！）。API 与脚本中的 API 相同。
+
+[[proxies-tests]]
+=== 代理
+
+[source,js]
+----
+const { expect } = require("chai");
+
+describe("Box", function() {
+  it('works', async () => {
+    const Box = await ethers.getContractFactory("Box");
+    const BoxV2 = await ethers.getContractFactory("BoxV2");
+  
+    const instance = await upgrades.deployProxy(Box, [42]);
+    const upgraded = await upgrades.upgradeProxy(await instance.getAddress(), BoxV2);
+
+    const value = await upgraded.value();
+    expect(value.toString()).to.equal('42');
+  });
+});
+----
+
+[[beacon-proxies-tests]]
+=== 灯塔代理
+
+[source,js]
+----
+const { expect } = require("chai");
+
+describe("Box", function() {
+  it('works', async () => {
+    const Box = await ethers.getContractFactory("Box");
+    const BoxV2 = await ethers.getContractFactory("BoxV2");
+
+    const beacon = await upgrades.deployBeacon(Box);
+    const instance = await upgrades.deployBeaconProxy(beacon, Box, [42]);
+    
+    await upgrades.upgradeBeacon(beacon, BoxV2);
+    const upgraded = BoxV2.attach(await instance.getAddress());
+
+    const value = await upgraded.value();
+    expect(value.toString()).to.equal('42');
+  });
+});
+----
+
+== API
+
+有关完整的 API 文档，请参阅 xref:api-hardhat-upgrades.adoc[Hardhat 升级 API]。
+```
