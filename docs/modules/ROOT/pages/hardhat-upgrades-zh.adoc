@@ -1,4 +1,4 @@
-```= Hardhat 使用指南
+= Hardhat 使用指南
 
 此程序包为 Hardhat 脚本添加函数，以便您可以为合约部署和升级代理。依赖于 `ethers.js`。
 
@@ -162,4 +162,3 @@ describe("Box", function() {
 == API
 
 有关完整的 API 文档，请参阅 xref:api-hardhat-upgrades.adoc[Hardhat 升级 API]。
-```
